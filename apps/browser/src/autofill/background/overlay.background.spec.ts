@@ -948,6 +948,61 @@ describe("OverlayBackground", () => {
       );
     });
 
+    it("filters ciphers by the inline menu filter text when the filter text is set and the focused field is not a password type", async () => {
+      overlayBackground["inlineMenuFilterText"] = "name-1";
+      overlayBackground["focusedFieldData"] = createFocusedFieldDataMock({
+        tabId: tab.id,
+        inlineMenuFillType: CipherType.Login,
+      });
+      getTabFromCurrentWindowIdSpy.mockResolvedValueOnce(tab);
+      cipherService.getAllDecryptedForUrl.mockResolvedValue([loginCipher1, loginCipher2]);
+      cipherService.sortCiphersByLastUsedThenName.mockReturnValue(-1);
+      searchService.searchCiphersBasic.mockReturnValue([loginCipher1]);
+
+      await overlayBackground.updateOverlayCiphers();
+      await flushPromises();
+
+      expect(searchService.searchCiphersBasic).toHaveBeenCalledWith(
+        expect.arrayContaining([loginCipher1, loginCipher2]),
+        "name-1",
+      );
+      expect(overlayBackground["inlineMenuCiphers"]).toStrictEqual(
+        new Map([["inline-menu-cipher-0", loginCipher1]]),
+      );
+    });
+
+    it("skips text filtering when the focused field is a password generation type", async () => {
+      overlayBackground["inlineMenuFilterText"] = "some-text";
+      overlayBackground["focusedFieldData"] = createFocusedFieldDataMock({
+        tabId: tab.id,
+        inlineMenuFillType: InlineMenuFillTypes.PasswordGeneration,
+      });
+      getTabFromCurrentWindowIdSpy.mockResolvedValueOnce(tab);
+      cipherService.getAllDecryptedForUrl.mockResolvedValue([loginCipher1, loginCipher2]);
+      cipherService.sortCiphersByLastUsedThenName.mockReturnValue(-1);
+
+      await overlayBackground.updateOverlayCiphers();
+      await flushPromises();
+
+      expect(searchService.searchCiphersBasic).not.toHaveBeenCalled();
+    });
+
+    it("skips text filtering when the focused field is a current password update type", async () => {
+      overlayBackground["inlineMenuFilterText"] = "some-text";
+      overlayBackground["focusedFieldData"] = createFocusedFieldDataMock({
+        tabId: tab.id,
+        inlineMenuFillType: InlineMenuFillTypes.CurrentPasswordUpdate,
+      });
+      getTabFromCurrentWindowIdSpy.mockResolvedValueOnce(tab);
+      cipherService.getAllDecryptedForUrl.mockResolvedValue([loginCipher1, loginCipher2]);
+      cipherService.sortCiphersByLastUsedThenName.mockReturnValue(-1);
+
+      await overlayBackground.updateOverlayCiphers();
+      await flushPromises();
+
+      expect(searchService.searchCiphersBasic).not.toHaveBeenCalled();
+    });
+
     it("posts an `updateAutofillInlineMenuListCiphers` message to the overlay list port, and send a `updateAutofillInlineMenuListCiphers` message to the tab indicating that the list of ciphers is populated", async () => {
       overlayBackground["focusedFieldData"] = createFocusedFieldDataMock({ tabId: tab.id });
       cipherService.getAllDecryptedForUrl.mockResolvedValue([loginCipher1]);
@@ -2505,6 +2560,84 @@ describe("OverlayBackground", () => {
             topFrameSendOptions,
           );
         });
+      });
+    });
+
+    describe("updateInlineMenuFilterText message handler", () => {
+      let sender: chrome.runtime.MessageSender;
+
+      beforeEach(() => {
+        sender = mock<chrome.runtime.MessageSender>({
+          tab: createChromeTabMock({ id: 1, url: "https://jest-testing-website.com" }),
+        });
+        getTabFromCurrentWindowIdSpy.mockResolvedValue(sender.tab);
+      });
+
+      it("stores the filter text and triggers a cipher update", async () => {
+        const updateOverlayCiphersSpy = jest
+          .spyOn(overlayBackground, "updateOverlayCiphers")
+          .mockResolvedValue(undefined);
+
+        sendMockExtensionMessage({ command: "updateInlineMenuFilterText", filterText: "phong" });
+        await flushPromises();
+
+        expect(overlayBackground["inlineMenuFilterText"]).toBe("phong");
+        expect(updateOverlayCiphersSpy).toHaveBeenCalledWith(false);
+      });
+
+      it("stores an empty string when no filter text is provided", async () => {
+        overlayBackground["inlineMenuFilterText"] = "existing-text";
+        jest.spyOn(overlayBackground, "updateOverlayCiphers").mockResolvedValue(undefined);
+
+        sendMockExtensionMessage({ command: "updateInlineMenuFilterText", filterText: "" });
+        await flushPromises();
+
+        expect(overlayBackground["inlineMenuFilterText"]).toBe("");
+      });
+    });
+
+    describe("openAutofillInlineMenu message handler - filter text behavior", () => {
+      let sender: chrome.runtime.MessageSender;
+      const topFrameSendOptions = { frameId: 0 };
+
+      beforeEach(() => {
+        sender = mock<chrome.runtime.MessageSender>({
+          tab: createChromeTabMock({ id: 1, url: "https://jest-testing-website.com" }),
+        });
+        getTabFromCurrentWindowIdSpy.mockResolvedValue(sender.tab);
+        tabsSendMessageSpy.mockImplementation();
+        sendMockExtensionMessage(
+          { command: "updateFocusedFieldData", focusedFieldData: createFocusedFieldDataMock() },
+          sender,
+        );
+        jest.spyOn(overlayBackground as any, "checkFocusedFieldHasValue").mockResolvedValue(true);
+      });
+
+      it("shows both button and list when the focused field has a value and filter text is set", async () => {
+        overlayBackground["inlineMenuFilterText"] = "phong";
+        overlayBackground["inlineMenuCiphers"] = new Map([
+          ["inline-menu-cipher-1", mock<CipherView>({ id: "inline-menu-cipher-1" })],
+        ]);
+
+        sendMockExtensionMessage({ command: "openAutofillInlineMenu" }, sender);
+        await flushPromises();
+
+        expect(tabsSendMessageSpy).toHaveBeenCalledWith(
+          sender.tab,
+          {
+            command: "appendAutofillInlineMenuToDom",
+            overlayElement: AutofillOverlayElement.Button,
+          },
+          topFrameSendOptions,
+        );
+        expect(tabsSendMessageSpy).toHaveBeenCalledWith(
+          sender.tab,
+          {
+            command: "appendAutofillInlineMenuToDom",
+            overlayElement: AutofillOverlayElement.List,
+          },
+          topFrameSendOptions,
+        );
       });
     });
 
