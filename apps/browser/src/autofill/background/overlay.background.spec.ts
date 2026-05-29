@@ -36,6 +36,7 @@ import {
 } from "@bitwarden/common/spec";
 import { UserId } from "@bitwarden/common/types/guid";
 import { CipherService } from "@bitwarden/common/vault/abstractions/cipher.service";
+import { SearchService } from "@bitwarden/common/vault/abstractions/search.service";
 import { TotpService } from "@bitwarden/common/vault/abstractions/totp.service";
 import { VaultSettingsService } from "@bitwarden/common/vault/abstractions/vault-settings/vault-settings.service";
 import { CipherRepromptType, CipherType } from "@bitwarden/common/vault/enums";
@@ -119,6 +120,7 @@ describe("OverlayBackground", () => {
   let totpService: MockProxy<TotpService>;
   let generatorService: MockProxy<CredentialGeneratorService>;
   let generatorHistoryService: MockProxy<GeneratorHistoryService>;
+  let searchService: MockProxy<SearchService>;
   let overlayBackground: OverlayBackground;
   let portKeyForTabSpy: Record<number, string>;
   let pageDetailsForTabSpy: PageDetailsForTab;
@@ -231,6 +233,7 @@ describe("OverlayBackground", () => {
     );
     generatorHistoryService = mock<GeneratorHistoryService>();
     generatorHistoryService.track.mockResolvedValue(null);
+    searchService = mock<SearchService>();
     overlayBackground = new OverlayBackground(
       logService,
       cipherService,
@@ -249,6 +252,7 @@ describe("OverlayBackground", () => {
       accountService,
       generatorHistoryService,
       generatorService,
+      searchService,
     );
     portKeyForTabSpy = overlayBackground["portKeyForTab"];
     pageDetailsForTabSpy = overlayBackground["pageDetailsForTab"];

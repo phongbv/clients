@@ -42,6 +42,7 @@ import { Utils } from "@bitwarden/common/platform/misc/utils";
 import { ThemeStateService } from "@bitwarden/common/platform/theming/theme-state.service";
 import { UserId } from "@bitwarden/common/types/guid";
 import { CipherService } from "@bitwarden/common/vault/abstractions/cipher.service";
+import { SearchService } from "@bitwarden/common/vault/abstractions/search.service";
 import { TotpService } from "@bitwarden/common/vault/abstractions/totp.service";
 import { VaultSettingsService } from "@bitwarden/common/vault/abstractions/vault-settings/vault-settings.service";
 import { CipherType } from "@bitwarden/common/vault/enums";
@@ -146,6 +147,7 @@ export class OverlayBackground implements OverlayBackgroundInterface {
   private inlineMenuListMessageConnectorPort: chrome.runtime.Port | null = null;
   private inlineMenuCiphers: Map<string, CipherView> = new Map();
   private inlineMenuFido2Credentials: Set<string> = new Set();
+  private inlineMenuFilterText: string = "";
   private inlineMenuPageTranslations: Record<string, string> | null = null;
   private inlineMenuPosition: InlineMenuPosition = {};
   private cardAndIdentityCiphers: Set<CipherView> | null = null;
@@ -219,6 +221,7 @@ export class OverlayBackground implements OverlayBackgroundInterface {
       void this.withSenderTab(sender, (tab) => this.abortFido2ActiveRequest(tab.id)),
     routeTargetedFieldsToFrame: ({ message, sender }) =>
       void this.withSenderTab(sender, (tab) => this.routeTargetedFieldsToFrame(tab, message)),
+    updateInlineMenuFilterText: ({ message }) => this.handleUpdateInlineMenuFilterText(message),
   };
   private readonly inlineMenuButtonPortMessageHandlers: InlineMenuButtonPortMessageHandlers = {
     triggerDelayedAutofillInlineMenuClosure: () => this.startInlineMenuDelayedClose$.next(),
@@ -262,6 +265,7 @@ export class OverlayBackground implements OverlayBackgroundInterface {
     private accountService: AccountService,
     private generatorHistoryService: GeneratorHistoryService,
     private generatorService: CredentialGeneratorService,
+    private searchService: SearchService,
   ) {
     this.initOverlayEventObservables();
   }
@@ -384,6 +388,7 @@ export class OverlayBackground implements OverlayBackgroundInterface {
 
     this.clearGeneratedPassword$.next();
     this.focusedFieldData = null;
+    this.inlineMenuFilterText = "";
   }
 
   /**
@@ -493,17 +498,48 @@ export class OverlayBackground implements OverlayBackgroundInterface {
       return [];
     }
 
+    let cipherViews: CipherView[];
     if (updateAllCipherTypes || !this.cardAndIdentityCiphers) {
-      return this.getAllCipherTypeViews(currentTab, activeUserId);
+      cipherViews = await this.getAllCipherTypeViews(currentTab, activeUserId);
+    } else {
+      const urlCiphers = (
+        await this.cipherService.getAllDecryptedForUrl(currentTab.url || "", activeUserId)
+      ).sort((a, b) => this.cipherService.sortCiphersByLastUsedThenName(a, b));
+
+      cipherViews = this.cardAndIdentityCiphers
+        ? urlCiphers.concat(...this.cardAndIdentityCiphers)
+        : urlCiphers;
     }
 
-    const cipherViews = (
-      await this.cipherService.getAllDecryptedForUrl(currentTab.url || "", activeUserId)
-    ).sort((a, b) => this.cipherService.sortCiphersByLastUsedThenName(a, b));
+    if (this.inlineMenuFilterText && !this.isFocusedFieldPasswordType()) {
+      cipherViews = this.searchService.searchCiphersBasic(cipherViews, this.inlineMenuFilterText);
+    }
 
-    return this.cardAndIdentityCiphers
-      ? cipherViews.concat(...this.cardAndIdentityCiphers)
-      : cipherViews;
+    return cipherViews;
+  }
+
+  /**
+   * Handles updating the inline menu filter text used to search within domain-matched ciphers.
+   * Stores the filter text and triggers a cipher refresh so the inline menu list reflects
+   * what the user has typed into the focused field.
+   *
+   * @param message - The extension message containing the filter text
+   */
+  private handleUpdateInlineMenuFilterText({ filterText }: OverlayBackgroundExtensionMessage) {
+    this.inlineMenuFilterText = filterText ?? "";
+    void this.updateOverlayCiphers(false);
+  }
+
+  /**
+   * Indicates whether the currently focused field is a password-type field.
+   * Used to prevent filtering cipher suggestions by the password value.
+   */
+  private isFocusedFieldPasswordType(): boolean {
+    const fillType = this.focusedFieldData?.inlineMenuFillType;
+    return (
+      fillType === InlineMenuFillTypes.PasswordGeneration ||
+      fillType === InlineMenuFillTypes.CurrentPasswordUpdate
+    );
   }
 
   /**
@@ -1983,6 +2019,7 @@ export class OverlayBackground implements OverlayBackgroundInterface {
     };
     this.allFieldData = allFieldsRect ?? [];
     this.isFieldCurrentlyFocused = true;
+    this.inlineMenuFilterText = "";
 
     if (this.shouldUpdatePasswordGeneratorMenuOnFieldFocus()) {
       this.updateInlineMenuGeneratedPasswordOnFocus(sender.tab).catch((error) =>
@@ -2363,6 +2400,12 @@ export class OverlayBackground implements OverlayBackgroundInterface {
    */
   private async openInlineMenuOnFilledField(sender: chrome.runtime.MessageSender) {
     if (sender.tab && (await this.shouldShowSaveLoginInlineMenuList(sender.tab))) {
+      await this.updateInlineMenuPosition(sender, AutofillOverlayElement.Button);
+      await this.updateInlineMenuPosition(sender, AutofillOverlayElement.List);
+      return;
+    }
+
+    if (this.inlineMenuFilterText) {
       await this.updateInlineMenuPosition(sender, AutofillOverlayElement.Button);
       await this.updateInlineMenuPosition(sender, AutofillOverlayElement.List);
       return;

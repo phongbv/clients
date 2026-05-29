@@ -497,7 +497,7 @@ describe("AutofillOverlayContentService", () => {
           );
         });
 
-        it("Closes the inline menu list and does not re-open the inline menu if the field has a value", async () => {
+        it("sends filter text, closes the inline menu list, and re-opens with filtered results if the field has a value and is not a password field", async () => {
           (autofillFieldElement as HTMLInputElement).value = "test";
 
           await autofillOverlayContentService.setupOverlayListeners(
@@ -508,11 +508,14 @@ describe("AutofillOverlayContentService", () => {
           autofillFieldElement.dispatchEvent(new Event("input"));
           await flushPromises();
 
+          expect(sendExtensionMessageSpy).toHaveBeenCalledWith("updateInlineMenuFilterText", {
+            filterText: "test",
+          });
           expect(sendExtensionMessageSpy).toHaveBeenCalledWith("closeAutofillInlineMenu", {
             overlayElement: AutofillOverlayElement.List,
             forceCloseInlineMenu: true,
           });
-          expect(sendExtensionMessageSpy).not.toHaveBeenCalledWith("openAutofillInlineMenu");
+          expect(sendExtensionMessageSpy).toHaveBeenCalledWith("openAutofillInlineMenu");
         });
 
         it("opens the inline menu if the field does not have a value", async () => {

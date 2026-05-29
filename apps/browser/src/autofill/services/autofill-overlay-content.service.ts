@@ -813,12 +813,25 @@ export class AutofillOverlayContentService implements AutofillOverlayContentServ
       return;
     }
 
+    const autofillFieldData = this.formFieldElements.get(formFieldElement);
+    const fillType = autofillFieldData?.inlineMenuFillType;
+    const isPasswordField =
+      (formFieldElement as HTMLInputElement).type === "password" ||
+      fillType === InlineMenuFillTypes.PasswordGeneration ||
+      fillType === InlineMenuFillTypes.CurrentPasswordUpdate;
+
+    if (!isPasswordField) {
+      await this.sendExtensionMessage("updateInlineMenuFilterText", {
+        filterText: (formFieldElement as FillableFormFieldElement).value || "",
+      });
+    }
+
     await this.sendExtensionMessage("closeAutofillInlineMenu", {
       overlayElement: AutofillOverlayElement.List,
       forceCloseInlineMenu: true,
     });
 
-    if (!formFieldElement?.value) {
+    if (!formFieldElement?.value || !isPasswordField) {
       await this.sendExtensionMessage("openAutofillInlineMenu");
     }
   }
